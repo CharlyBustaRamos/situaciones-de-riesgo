@@ -73,9 +73,10 @@ const sounds = Object.fromEntries(
 
 const allStimuli = categories.flatMap(category => category.images.map(image => `${category.id}/${image}`));
 const shuffledNumbers = shuffle(Array.from({ length: 100 }, (_, number) => number));
-const numberAnswers = new Map(allStimuli.map((image, index) => [image, shuffledNumbers[index]]));
+const numberAnswers = new Map(categories.map((category, index) => [category.id, shuffledNumbers[index]]));
 const numberOptions = new Map(allStimuli.map(image => {
-    const answer = numberAnswers.get(image);
+    const categoryId = image.split("/")[0];
+    const answer = numberAnswers.get(categoryId);
     const distractors = shuffle(Array.from({ length: 100 }, (_, number) => number).filter(number => number !== answer)).slice(0, 3);
     return [image, [answer, ...distractors]];
 }));
@@ -247,15 +248,14 @@ function beginPhase() {
     const phaseId = state.phaseId;
     state = {
         phaseId,
-        categoryIndex: 0,
         itemIndex: 0,
-        order: shuffle(categories[0].images),
+        order: shuffle(allStimuli),
         totalErrors: 0,
         trialErrors: 0,
         correctStreak: 0,
         completedStreaks: 0,
-        categoryStartedAt: performance.now(),
-        categoryDurations: {},
+        categoryDurations: Object.fromEntries(categories.map(category => [category.id, 0])),
+        exerciseStartedAt: null,
         responseTimes: Object.fromEntries(categories.map(category => [category.id, []])),
         trialResponseSeconds: 0,
         optionsShownAt: null,
@@ -265,25 +265,31 @@ function beginPhase() {
     renderStimulus();
 }
 
+function currentStimulus() {
+    const [categoryId, image] = state.order[state.itemIndex].split("/");
+    return { categoryId, image };
+}
+
 function currentCategory() {
-    return categories[state.categoryIndex];
+    const { categoryId } = currentStimulus();
+    return categories.find(category => category.id === categoryId);
 }
 
 function currentImage() {
-    return state.order[state.itemIndex];
+    return currentStimulus().image;
 }
 
 function currentImagePath() {
-    return `img/${currentCategory().id}/${currentImage()}`;
+    return `img/${state.order[state.itemIndex]}`;
 }
 
 function gameHeader() {
     const phase = phases[state.phaseId];
-    const total = categories.length * 6;
-    const completed = state.categoryIndex * 6 + state.itemIndex;
+    const total = allStimuli.length;
+    const completed = state.itemIndex;
     const percent = Math.round((completed / total) * 100);
     return `
-        <div class="game-topline"><span class="phase-pill">${phase.name.toUpperCase()}</span><span class="game-category">Situación ${state.itemIndex + 1} de 6</span></div>
+        <div class="game-topline"><span class="phase-pill">${phase.name.toUpperCase()}</span><span class="game-category">Situación ${state.itemIndex + 1} de ${total}</span></div>
         <div class="progress-track" role="progressbar" aria-label="Progreso de la fase" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${completed}"><span style="width:${percent}%"></span></div>
     `;
 }
@@ -291,6 +297,7 @@ function gameHeader() {
 function renderStimulus() {
     clearTimers();
     state.locked = false;
+    if (state.exerciseStartedAt === null) state.exerciseStartedAt = performance.now();
     const token = ++stimulusToken;
     app.innerHTML = `
         <section class="game-page">
@@ -327,7 +334,7 @@ function getOptions() {
     const phase = phases[state.phaseId];
     if (phase.kind === "numbers") {
         const image = `${currentCategory().id}/${currentImage()}`;
-        const correct = numberAnswers.get(image);
+        const correct = numberAnswers.get(currentCategory().id);
         return shuffle(numberOptions.get(image)).map(number => ({ id: String(number), label: String(number), correct: number === correct }));
     }
 
@@ -421,20 +428,12 @@ function saveTrialResponseTime() {
 
 function advanceTrial() {
     const category = currentCategory();
+    const exerciseSeconds = Math.max(1, Math.round((performance.now() - state.exerciseStartedAt) / 1000));
+    state.categoryDurations[category.id] += exerciseSeconds;
     if (state.itemIndex + 1 < state.order.length) {
         state.itemIndex += 1;
         state.trialErrors = 0;
-        renderStimulus();
-        return;
-    }
-
-    state.categoryDurations[category.id] = Math.max(1, Math.round((performance.now() - state.categoryStartedAt) / 1000));
-    if (state.categoryIndex + 1 < categories.length) {
-        state.categoryIndex += 1;
-        state.itemIndex = 0;
-        state.order = shuffle(categories[state.categoryIndex].images);
-        state.trialErrors = 0;
-        state.categoryStartedAt = performance.now();
+        state.exerciseStartedAt = null;
         renderStimulus();
         return;
     }
