@@ -74,11 +74,20 @@ button:focus-visible, a:focus-visible { outline: 3px solid #efad43; outline-offs
 .phase-button:hover { background: var(--blue-dark); border-color: var(--blue-dark); }
 .phase-button span, .primary-button span { font-size: 19px; line-height: 12px; transition: transform 150ms ease; }
 .phase-button:hover span, .primary-button:hover span { transform: translateX(3px); }
+.settings-menu-actions { display: flex; justify-content: flex-start; margin-bottom: 16px; }
 .quiet-button, .primary-button { min-height: 43px; padding: 0 17px; border: 1px solid var(--line); cursor: pointer; font-size: 13px; font-weight: 700; transition: background 140ms ease, color 140ms ease, border-color 140ms ease; }
 .quiet-button { color: var(--blue-dark); background: #fff; }
 .quiet-button:hover { background: var(--blue-soft); border-color: #bdd4de; }
 .primary-button { display: inline-flex; align-items: center; justify-content: center; gap: 16px; color: #fff; background: var(--blue); border-color: var(--blue); }
 .primary-button:hover { background: var(--blue-dark); border-color: var(--blue-dark); }
+.settings-page { max-width: 720px; min-height: 48vh; margin: 0 auto; }
+.settings-page > h1 { margin: 10px 0 0; color: var(--ink); font-size: 32px; line-height: 1.2; }
+.settings-control { max-width: 560px; margin: 27px 0 22px; padding: 20px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.settings-control label { color: var(--ink); font-size: 15px; font-weight: 700; }
+.settings-range { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 22px; color: var(--muted); font-size: 12px; }
+.settings-range span:last-child { text-align: right; }
+.settings-range input { width: 100%; grid-column: 1 / -1; grid-row: 2; margin: 0; accent-color: var(--blue); cursor: pointer; }
+.settings-value { display: block; margin-top: 18px; color: var(--blue-dark); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
 
 .instructions-page, .game-page, .completion-page { animation: appear 240ms ease-out both; }
 @keyframes appear { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }

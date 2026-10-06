@@ -46,6 +46,24 @@ const phases = {
     }
 };
 
+const observationTimeKey = "protocolo-observation-seconds-v1";
+const minimumObservationSeconds = 5;
+const maximumObservationSeconds = 15;
+
+function loadObservationSeconds() {
+    try {
+        const savedValue = localStorage.getItem(observationTimeKey);
+        if (savedValue === null) return maximumObservationSeconds;
+        const seconds = Number(savedValue);
+        if (!Number.isFinite(seconds)) return maximumObservationSeconds;
+        return Math.min(maximumObservationSeconds, Math.max(minimumObservationSeconds, Math.round(seconds)));
+    } catch {
+        return maximumObservationSeconds;
+    }
+}
+
+let observationSeconds = loadObservationSeconds();
+
 const protocols = [
     { id: "asfixia", image: "protocolo_asfixia.jpg" },
     { id: "rcp", image: "protocolo_rcp.jpg" },
@@ -65,7 +83,8 @@ const soundFiles = {
     reloj: "reloj.mp3",
     acierto: "acierto.mp3",
     error: "error.mp3",
-    tada: "tada.mp3"
+    tada: "tada.mp3",
+    doorbell: "doorbell.ogg"
 };
 const sounds = Object.fromEntries(
     Object.entries(soundFiles).map(([name, file]) => [name, new Audio(`audio/${file}`)])
@@ -159,6 +178,9 @@ function renderHome() {
             </div>
         </section>
         <section class="phase-section" aria-labelledby="phase-heading">
+            <div class="settings-menu-actions">
+                <button class="quiet-button" type="button" data-action="settings">Ajustar tiempo</button>
+            </div>
             <div class="section-heading">
                 <div><h2 id="phase-heading">Selecciona una fase</h2></div>
             </div>
@@ -182,6 +204,29 @@ function renderHome() {
         <div class="reset-session-actions">
             <button class="reset-session-button" type="button" data-action="confirm-reset">Reiniciar sesión</button>
         </div>
+    `;
+    app.focus();
+}
+
+function renderSettings() {
+    clearTimers();
+    stopAllSounds();
+    state = null;
+    menuButton.hidden = true;
+    app.innerHTML = `
+        <section class="settings-page" aria-labelledby="settings-heading">
+            <h1 id="settings-heading">Ajustar tiempo</h1>
+            <div class="settings-control">
+                <label for="observation-time">Tiempo de observación</label>
+                <div class="settings-range">
+                    <span>5 s</span>
+                    <input id="observation-time" type="range" min="${minimumObservationSeconds}" max="${maximumObservationSeconds}" step="1" value="${observationSeconds}" aria-valuetext="${observationSeconds} segundos">
+                    <span>15 s</span>
+                </div>
+                <output class="settings-value" id="observation-time-value" for="observation-time">${observationSeconds} segundos</output>
+            </div>
+            <button class="quiet-button" type="button" data-action="settings-back">Volver al menú</button>
+        </section>
     `;
     app.focus();
 }
@@ -227,6 +272,7 @@ function startPhaseFlow(phaseId) {
 }
 
 function renderInstructions() {
+    const instructions = instructionText.map(text => text.replace("15 segundos", `${observationSeconds} segundos`));
     app.innerHTML = `
         <section class="instructions-page">
             <div class="page-kicker"><span class="phase-pill">FASE 1</span><span>ANTES DE COMENZAR</span></div>
@@ -234,7 +280,7 @@ function renderInstructions() {
                 <div class="instructions-copy">
                     <p class="eyebrow">presta atención a cada escena.</p>
                     <h1>INSTRUCCIONES</h1>
-                    <ol class="instruction-list">${instructionText.map(text => `<li>${text}</li>`).join("")}</ol>
+                    <ol class="instruction-list">${instructions.map(text => `<li>${text}</li>`).join("")}</ol>
                     <button class="primary-button" type="button" data-action="begin">Comenzar fase <span aria-hidden="true">&#8594;</span></button>
                 </div>
             </div>
@@ -305,7 +351,7 @@ function renderStimulus() {
             <div class="stimulus-layout">
                 <div class="stimulus-copy">
                     <h1>Observa la imagen</h1>
-                    <div class="countdown-block"><span class="countdown-number" id="countdown">15</span><span class="countdown-label">SEGUNDOS<br>RESTANTES</span></div>
+                    <div class="countdown-block"><span class="countdown-number" id="countdown">${observationSeconds}</span><span class="countdown-label">SEGUNDOS<br>RESTANTES</span></div>
                 </div>
                 <div class="stimulus-visual">
                     <figure class="stimulus-image"><img src="${currentImagePath()}" alt="Situación de riesgo, escena ${state.itemIndex + 1}"></figure>
@@ -316,9 +362,10 @@ function renderStimulus() {
     `;
     playSound("reloj", true);
     const startedAt = Date.now();
+    const observationMilliseconds = observationSeconds * 1000;
     countdownTimer = window.setInterval(() => {
         if (token !== stimulusToken) return;
-        const remaining = Math.max(0, Math.ceil(15 - (Date.now() - startedAt) / 1000));
+        const remaining = Math.max(0, Math.ceil(observationSeconds - (Date.now() - startedAt) / 1000));
         const countdown = document.querySelector("#countdown");
         if (countdown) countdown.textContent = remaining;
     }, 200);
@@ -326,7 +373,7 @@ function renderStimulus() {
         if (token !== stimulusToken) return;
         stopSound("reloj");
         renderChoices();
-    }, 15000);
+    }, observationMilliseconds);
     app.focus();
 }
 
@@ -359,7 +406,7 @@ function renderChoices() {
                     : `<button class="answer-option protocol-option" type="button" data-option="${option.id}" aria-label="Opción ${index + 1}"><img src="img/${option.image}" alt=""></button>`
                 ).join("")}
             </div>
-            ${phase.feedback ? `<div class="feedback-area" id="feedback-area" aria-live="polite"><span class="streak-indicator">Respuestas correctas consecutivas <strong>${state.correctStreak} / 3</strong></span><span class="retry-indicator">Intento ${state.trialErrors + 1} de 3</span><span class="reward-message" id="reward-message"></span></div>` : `<p class="quiet-note">Esta fase no ofrece retroalimentación durante los ensayos.</p>`}
+            ${phase.feedback ? `<div class="feedback-area" id="feedback-area" aria-live="polite"><span class="streak-indicator">Racha de respuestas <strong>${state.correctStreak} / 3</strong></span><span class="retry-indicator">Intento ${state.trialErrors + 1} de 3</span><span class="reward-message" id="reward-message"></span></div>` : `<p class="quiet-note">Esta fase no ofrece retroalimentación durante los ensayos.</p>`}
         </section>
     `;
     app.focus();
@@ -380,7 +427,7 @@ function chooseOption(button) {
         saveTrialResponseTime();
         if (phase.feedback) {
             button.classList.add("is-correct");
-            playSound("acierto");
+            playSound(state.correctStreak === 2 ? "doorbell" : "acierto");
         }
         state.correctStreak += 1;
         if (state.correctStreak === 3) {
@@ -533,6 +580,20 @@ app.addEventListener("click", event => {
     if (actionButton.dataset.action === "confirm-reset") renderResetConfirmation();
     if (actionButton.dataset.action === "cancel-reset") renderHome();
     if (actionButton.dataset.action === "reset-session") resetSession();
+    if (actionButton.dataset.action === "settings") renderSettings();
+    if (actionButton.dataset.action === "settings-back") renderHome();
+});
+
+app.addEventListener("input", event => {
+    if (event.target.id !== "observation-time") return;
+    observationSeconds = Number(event.target.value);
+    event.target.setAttribute("aria-valuetext", `${observationSeconds} segundos`);
+    document.querySelector("#observation-time-value").textContent = `${observationSeconds} segundos`;
+    try {
+        localStorage.setItem(observationTimeKey, String(observationSeconds));
+    } catch {
+        // The selected duration still applies to the current session.
+    }
 });
 
 menuButton.addEventListener("click", renderHome);
