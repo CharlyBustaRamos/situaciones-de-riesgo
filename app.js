@@ -29,19 +29,49 @@ const phases = {
     fase1: {
         name: "Fase 1",
         description: "Relaciona cada situación con un número y recibe retroalimentación.",
-        kind: "numbers",
+        part: 1,
+        sampleKind: "situation",
+        answerKind: "number",
         feedback: true
     },
     fase2: {
         name: "Fase 2",
         description: "Practica la selección del protocolo correspondiente.",
-        kind: "protocols",
+        part: 1,
+        sampleKind: "situation",
+        answerKind: "protocol",
         feedback: true
     },
     fase3: {
         name: "Fase 3",
         description: "Resuelve los ensayos sin señales de acierto o error.",
-        kind: "protocols",
+        part: 1,
+        sampleKind: "situation",
+        answerKind: "protocol",
+        feedback: false
+    },
+    fase4: {
+        name: "Fase 4",
+        description: "Relaciona el número aprendido con la situación de riesgo.",
+        part: 2,
+        sampleKind: "number",
+        answerKind: "situation",
+        feedback: true
+    },
+    fase5: {
+        name: "Fase 5",
+        description: "Relaciona el protocolo con la situación de riesgo correspondiente.",
+        part: 2,
+        sampleKind: "protocol",
+        answerKind: "situation",
+        feedback: true
+    },
+    fase6: {
+        name: "Fase 6",
+        description: "Relaciona el número aprendido con el protocolo de actuación.",
+        part: 2,
+        sampleKind: "number",
+        answerKind: "protocol",
         feedback: false
     }
 };
@@ -90,18 +120,20 @@ const sounds = Object.fromEntries(
     Object.entries(soundFiles).map(([name, file]) => [name, new Audio(`audio/${file}`)])
 );
 
+const trialsPerCategory = 4;
 const allStimuli = categories.flatMap(category => category.images.map(image => `${category.id}/${image}`));
-const shuffledNumbers = shuffle(Array.from({ length: 100 }, (_, number) => number));
-const numberAnswers = new Map(categories.map((category, index) => [category.id, shuffledNumbers[index]]));
+const numberAnswersStorageKey = "protocolo-number-associations-v1";
+const numberAnswers = loadNumberAnswers();
 const numberOptions = new Map(allStimuli.map(image => {
     const categoryId = image.split("/")[0];
     const answer = numberAnswers.get(categoryId);
     const distractors = shuffle(Array.from({ length: 100 }, (_, number) => number).filter(number => number !== answer)).slice(0, 3);
     return [image, [answer, ...distractors]];
 }));
-const storageKey = "protocolo-training-results-v1";
+const storageKey = "protocolo-training-results-v2";
 let results = loadResults();
 let state = null;
+let pendingPhaseAfterFase1 = null;
 let stimulusTimer;
 let countdownTimer;
 let responseTimer;
@@ -114,6 +146,27 @@ function shuffle(items) {
         [shuffled[index], shuffled[otherIndex]] = [shuffled[otherIndex], shuffled[index]];
     }
     return shuffled;
+}
+
+function loadNumberAnswers() {
+    try {
+        const savedAnswers = JSON.parse(localStorage.getItem(numberAnswersStorageKey));
+        if (categories.every(category => Number.isInteger(savedAnswers?.[category.id]) && savedAnswers[category.id] >= 0 && savedAnswers[category.id] <= 99)
+            && new Set(categories.map(category => savedAnswers[category.id])).size === categories.length) {
+            return new Map(categories.map(category => [category.id, savedAnswers[category.id]]));
+        }
+    } catch {
+        // A fresh association is generated if saved values are unavailable.
+    }
+
+    const assignedNumbers = shuffle(Array.from({ length: 100 }, (_, number) => number));
+    const answers = new Map(categories.map((category, index) => [category.id, assignedNumbers[index]]));
+    try {
+        localStorage.setItem(numberAnswersStorageKey, JSON.stringify(Object.fromEntries(answers)));
+    } catch {
+        // The association remains consistent for the current page session.
+    }
+    return answers;
 }
 
 function loadResults() {
@@ -166,10 +219,28 @@ function formatResponseSeconds(seconds) {
     return Number.isFinite(seconds) ? `${seconds.toFixed(1)} s` : "Sin dato";
 }
 
+function renderPhaseCards(part) {
+    return Object.entries(phases)
+        .filter(([, phase]) => phase.part === part)
+        .map(([id, phase]) => {
+            const unavailable = ["fase4", "fase6"].includes(id) && !results.fase1;
+            const status = results[id] ? "COMPLETADA" : unavailable ? "NO DISPONIBLE" : "DISPONIBLE";
+            return `
+                <article class="phase-card">
+                    <div class="phase-card-top"><span class="phase-status ${results[id] ? "is-complete" : ""} ${unavailable ? "is-unavailable" : ""}">${status}</span></div>
+                    <h3>${phase.name}</h3>
+                    <p>${phase.description}</p>
+                    <button class="phase-button" type="button" data-phase="${id}">${results[id] ? "Repetir fase" : "Comenzar fase"}<span aria-hidden="true">&#8594;</span></button>
+                </article>
+            `;
+        }).join("");
+}
+
 function renderHome() {
     clearTimers();
     stopAllSounds();
     state = null;
+    pendingPhaseAfterFase1 = null;
     menuButton.hidden = true;
     app.innerHTML = `
         <section class="welcome-layout">
@@ -184,16 +255,13 @@ function renderHome() {
             <div class="section-heading">
                 <div><h2 id="phase-heading">Selecciona una fase</h2></div>
             </div>
-            <div class="phase-grid">
-                ${Object.entries(phases).map(([id, phase], index) => `
-                    <article class="phase-card">
-                        <div class="phase-card-top"><span class="phase-status ${results[id] ? "is-complete" : ""}">${results[id] ? "COMPLETADA" : "DISPONIBLE"}</span></div>
-                        <h3>${phase.name}</h3>
-                        <p>${phase.description}</p>
-                        <button class="phase-button" type="button" data-phase="${id}">${results[id] ? "Repetir fase" : "Comenzar fase"}<span aria-hidden="true">&#8594;</span></button>
-                    </article>
-                `).join("")}
+            <div class="phase-grid">${renderPhaseCards(1)}</div>
+        </section>
+        <section class="phase-section part-two-section" aria-labelledby="part-two-heading">
+            <div class="section-heading">
+                <div><h2 id="part-two-heading">Parte 2</h2></div>
             </div>
+            <div class="phase-grid">${renderPhaseCards(2)}</div>
         </section>
         <section class="results-section" aria-labelledby="results-heading">
             <div class="section-heading">
@@ -231,6 +299,23 @@ function renderSettings() {
     app.focus();
 }
 
+function renderPhasePrerequisiteConfirmation() {
+    clearTimers();
+    stopAllSounds();
+    state = null;
+    menuButton.hidden = true;
+    app.innerHTML = `
+        <section class="phase-prerequisite" aria-labelledby="phase-prerequisite-heading">
+            <h1 id="phase-prerequisite-heading">Es necesario realizar la primera fase para hacer esta fase. ¿Deseas continuar?</h1>
+            <div class="phase-prerequisite-actions">
+                <button class="quiet-button" type="button" data-action="cancel-prerequisite">No</button>
+                <button class="primary-button" type="button" data-action="continue-prerequisite">Sí</button>
+            </div>
+        </section>
+    `;
+    app.focus();
+}
+
 function renderResetConfirmation() {
     clearTimers();
     stopAllSounds();
@@ -252,15 +337,23 @@ function resetSession() {
     results = {};
     try {
         localStorage.removeItem(storageKey);
+        localStorage.removeItem(numberAnswersStorageKey);
+        window.location.reload();
     } catch {
         saveResults();
+        renderHome();
     }
-    renderHome();
 }
 
 function startPhaseFlow(phaseId) {
+    if (["fase4", "fase6"].includes(phaseId) && !results.fase1) {
+        pendingPhaseAfterFase1 = phaseId;
+        renderPhasePrerequisiteConfirmation();
+        return;
+    }
     clearTimers();
     stopAllSounds();
+    if (phaseId !== "fase1") pendingPhaseAfterFase1 = null;
     state = { phaseId };
     menuButton.hidden = false;
     if (phaseId === "fase1") {
@@ -295,7 +388,7 @@ function beginPhase() {
     state = {
         phaseId,
         itemIndex: 0,
-        order: shuffle(allStimuli),
+        order: createPhaseOrder(),
         totalErrors: 0,
         trialErrors: 0,
         correctStreak: 0,
@@ -309,6 +402,12 @@ function beginPhase() {
         locked: false
     };
     renderStimulus();
+}
+
+function createPhaseOrder() {
+    return shuffle(categories.flatMap(category =>
+        shuffle(category.images).slice(0, trialsPerCategory).map(image => `${category.id}/${image}`)
+    ));
 }
 
 function currentStimulus() {
@@ -331,7 +430,7 @@ function currentImagePath() {
 
 function gameHeader() {
     const phase = phases[state.phaseId];
-    const total = allStimuli.length;
+    const total = state.order.length;
     const completed = state.itemIndex;
     const percent = Math.round((completed / total) * 100);
     return `
@@ -345,17 +444,26 @@ function renderStimulus() {
     state.locked = false;
     if (state.exerciseStartedAt === null) state.exerciseStartedAt = performance.now();
     const token = ++stimulusToken;
+    const phase = phases[state.phaseId];
+    const category = currentCategory();
+    const sampleMarkup = phase.sampleKind === "number"
+        ? `<div class="sample-number" role="img" aria-label="Número aprendido">${numberAnswers.get(category.id)}</div>`
+        : phase.sampleKind === "protocol"
+            ? `<figure class="stimulus-image"><img src="img/${category.protocol}" alt="Protocolo visual"></figure>`
+            : `<figure class="stimulus-image"><img src="${currentImagePath()}" alt="Situación de riesgo, escena ${state.itemIndex + 1}"></figure><p class="stimulus-description">${category.description}</p>`;
+    const sampleHeading = phase.sampleKind === "number"
+        ? "Observa el número"
+        : phase.sampleKind === "protocol" ? "Observa el protocolo" : "Observa la imagen";
     app.innerHTML = `
         <section class="game-page">
             ${gameHeader()}
             <div class="stimulus-layout">
                 <div class="stimulus-copy">
-                    <h1>Observa la imagen</h1>
+                    <h1>${sampleHeading}</h1>
                     <div class="countdown-block"><span class="countdown-number" id="countdown">${observationSeconds}</span><span class="countdown-label">SEGUNDOS<br>RESTANTES</span></div>
                 </div>
                 <div class="stimulus-visual">
-                    <figure class="stimulus-image"><img src="${currentImagePath()}" alt="Situación de riesgo, escena ${state.itemIndex + 1}"></figure>
-                    <p class="stimulus-description">${currentCategory().description}</p>
+                    ${sampleMarkup}
                 </div>
             </div>
         </section>
@@ -379,13 +487,34 @@ function renderStimulus() {
 
 function getOptions() {
     const phase = phases[state.phaseId];
-    if (phase.kind === "numbers") {
+    if (phase.answerKind === "number") {
         const image = `${currentCategory().id}/${currentImage()}`;
         const correct = numberAnswers.get(currentCategory().id);
         return shuffle(numberOptions.get(image)).map(number => ({ id: String(number), label: String(number), correct: number === correct }));
     }
 
-    return shuffle(protocols.map(protocol => ({ ...protocol, correct: protocol.id === currentCategory().id })));
+    if (phase.answerKind === "protocol") {
+        return shuffle(protocols.map(protocol => ({ ...protocol, correct: protocol.id === currentCategory().id })));
+    }
+
+    const correctImage = state.order[state.itemIndex];
+    const correctCategory = currentCategory();
+    const situationOptions = [
+        { image: correctImage, category: correctCategory, correct: true },
+        ...shuffle(categories.filter(category => category.id !== correctCategory.id)).map(category => ({
+            image: `${category.id}/${shuffle(category.images)[0]}`,
+            category,
+            correct: false
+        }))
+    ];
+    return shuffle(situationOptions).map(({ image, category, correct }) => {
+        return {
+            id: image,
+            image,
+            description: category.description,
+            correct
+        };
+    });
 }
 
 function renderChoices() {
@@ -395,15 +524,24 @@ function renderChoices() {
     state.options = getOptions();
     state.optionsShownAt = performance.now();
     const phase = phases[state.phaseId];
-    const isNumbers = phase.kind === "numbers";
+    const isNumbers = phase.answerKind === "number";
+    const choiceInstruction = phase.answerKind === "number"
+        ? "ELIGE UNA RESPUESTA"
+        : phase.answerKind === "situation" ? "ELIGE LA SITUACIÓN" : "SELECCIONA EL PROTOCOLO";
+    const choiceHeading = phase.answerKind === "number"
+        ? "¿Qué número corresponde?"
+        : phase.answerKind === "situation" ? "¿Qué situación corresponde?" : "¿Qué protocolo corresponde?";
+    const choiceGrid = `${phase.answerKind}-grid`;
     app.innerHTML = `
         <section class="game-page">
             ${gameHeader()}
-            <div class="choice-heading"><div><p class="eyebrow">${isNumbers ? "ELIGE UNA RESPUESTA" : "SELECCIONA UNA OPCIÓN"}</p><h1>${isNumbers ? "¿Qué número corresponde?" : "¿Qué actuación corresponde?"}</h1></div></div>
-            <div class="choice-grid ${isNumbers ? "number-grid" : "protocol-grid"}" aria-label="Opciones de respuesta">
+            <div class="choice-heading"><div><p class="eyebrow">${choiceInstruction}</p><h1>${choiceHeading}</h1></div></div>
+            <div class="choice-grid ${choiceGrid}" aria-label="Opciones de respuesta">
                 ${state.options.map((option, index) => isNumbers
                     ? `<button class="answer-option number-option" type="button" data-option="${option.id}" aria-label="Elegir número ${option.label}"><span class="number-value">${option.label}</span></button>`
-                    : `<button class="answer-option protocol-option" type="button" data-option="${option.id}" aria-label="Opción ${index + 1}"><img src="img/${option.image}" alt=""></button>`
+                    : phase.answerKind === "protocol"
+                        ? `<button class="answer-option protocol-option" type="button" data-option="${option.id}" aria-label="Opción ${index + 1}"><img src="img/${option.image}" alt=""></button>`
+                        : `<button class="answer-option situation-option" type="button" data-option="${option.id}" aria-label="Situación ${index + 1}"><img src="img/${option.image}" alt=""><span>${option.description}</span></button>`
                 ).join("")}
             </div>
             ${phase.feedback ? `<div class="feedback-area" id="feedback-area" aria-live="polite"><span class="streak-indicator">Racha de respuestas <strong>${state.correctStreak} / 3</strong></span><span class="retry-indicator">Intento ${state.trialErrors + 1} de 3</span><span class="reward-message" id="reward-message"></span></div>` : `<p class="quiet-note">Esta fase no ofrece retroalimentación durante los ensayos.</p>`}
@@ -519,14 +657,12 @@ function renderRecordCard(phaseId) {
     }
     const responseDetails = categories.map(category => {
         const times = record.responseTimes?.[category.id] || [];
-        const timesByExercise = new Map(times.map(entry => [entry.exercise, entry.seconds]));
         return `
             <details class="response-category">
-                <summary><span>${category.name}</span><span>${times.length} de 6</span></summary>
-                <dl class="response-time-list">${Array.from({ length: 6 }, (_, index) => {
-                    const exercise = index + 1;
-                    return `<div><dt>Ejercicio ${exercise}</dt><dd>${formatResponseSeconds(timesByExercise.get(exercise))}</dd></div>`;
-                }).join("")}</dl>
+                <summary><span>${category.name}</span><span>${times.length} de ${trialsPerCategory}</span></summary>
+                <dl class="response-time-list">${[...times].sort((first, second) => first.exercise - second.exercise).map(entry =>
+                    `<div><dt>Ejercicio ${entry.exercise}</dt><dd>${formatResponseSeconds(entry.seconds)}</dd></div>`
+                ).join("")}</dl>
             </details>
         `;
     }).join("");
@@ -547,8 +683,14 @@ function renderRecordCard(phaseId) {
 
 function renderCompletion() {
     const phaseId = state.phaseId;
-    const nextPhase = phaseId === "fase1" ? "fase2" : phaseId === "fase2" ? "fase3" : null;
-    const isFinalPhase = phaseId === "fase3";
+    const phaseOrder = Object.keys(phases);
+    const nextPhase = phaseId === "fase1" && pendingPhaseAfterFase1
+        ? pendingPhaseAfterFase1
+        : phaseOrder[phaseOrder.indexOf(phaseId) + 1] || null;
+    const nextPhaseLabel = phaseId === "fase1" && pendingPhaseAfterFase1
+        ? `Continuar a ${phases[nextPhase].name}`
+        : "Siguiente fase";
+    const isFinalPhase = phaseId === "fase6";
     app.innerHTML = `
         <section class="completion-page">
             <div class="completion-heading"><span class="completion-check" aria-hidden="true">&#10003;</span><p class="eyebrow">${isFinalPhase ? "REGISTRO DE SESIÓN" : "FASE COMPLETADA"}</p><h1>¡Bien hecho!</h1><p>${isFinalPhase ? "Este es el registro de resultados de las tres fases." : `${phases[phaseId].name} completada. Aquí tienes el registro de esta fase.`}</p></div>
@@ -556,7 +698,7 @@ function renderCompletion() {
                 ? `<div class="record-grid">${Object.keys(phases).map(renderRecordCard).join("")}</div>`
                 : `<div class="single-record">${renderRecordCard(phaseId)}<p class="total-time">Tiempo total de la fase <strong>${formatDuration(results[phaseId].totalSeconds)}</strong></p></div>`
             }
-            <div class="completion-actions"><button class="quiet-button" type="button" data-action="menu">Menú principal</button>${nextPhase ? `<button class="primary-button" type="button" data-phase="${nextPhase}">Siguiente fase <span aria-hidden="true">&#8594;</span></button>` : ""}</div>
+            <div class="completion-actions"><button class="quiet-button" type="button" data-action="menu">Menú principal</button>${nextPhase ? `<button class="primary-button" type="button" data-phase="${nextPhase}">${nextPhaseLabel} <span aria-hidden="true">&#8594;</span></button>` : ""}</div>
         </section>
     `;
     app.focus();
@@ -582,6 +724,8 @@ app.addEventListener("click", event => {
     if (actionButton.dataset.action === "reset-session") resetSession();
     if (actionButton.dataset.action === "settings") renderSettings();
     if (actionButton.dataset.action === "settings-back") renderHome();
+    if (actionButton.dataset.action === "continue-prerequisite") startPhaseFlow("fase1");
+    if (actionButton.dataset.action === "cancel-prerequisite") renderHome();
 });
 
 app.addEventListener("input", event => {
