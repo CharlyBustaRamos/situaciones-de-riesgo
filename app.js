@@ -72,7 +72,7 @@ const phases = {
         part: 2,
         sampleKind: "number",
         answerKind: "protocol",
-        feedback: false
+        feedback: true
     }
 };
 
@@ -169,9 +169,25 @@ function loadNumberAnswers() {
     return answers;
 }
 
+function normalizePhaseRecord(record) {
+    if (!record || typeof record !== "object") return null;
+    return {
+        ...record,
+        categoryDurations: Object.fromEntries(categories.map(category => [category.id, Number(record.categoryDurations?.[category.id]) || 0])),
+        responseTimes: Object.fromEntries(categories.map(category => [category.id, Array.isArray(record.responseTimes?.[category.id]) ? record.responseTimes[category.id] : []]))
+    };
+}
+
 function loadResults() {
     try {
-        return JSON.parse(localStorage.getItem(storageKey)) || {};
+        const rawResults = JSON.parse(localStorage.getItem(storageKey)) || {};
+        if (!rawResults || typeof rawResults !== "object") return {};
+        return Object.fromEntries(
+            Object.entries(rawResults)
+                .filter(([phaseId]) => phases[phaseId])
+                .map(([phaseId, record]) => [phaseId, normalizePhaseRecord(record)])
+                .filter(([, record]) => record)
+        );
     } catch {
         return {};
     }
@@ -223,11 +239,10 @@ function renderPhaseCards(part) {
     return Object.entries(phases)
         .filter(([, phase]) => phase.part === part)
         .map(([id, phase]) => {
-            const unavailable = ["fase4", "fase6"].includes(id) && !results.fase1;
-            const status = results[id] ? "COMPLETADA" : unavailable ? "NO DISPONIBLE" : "DISPONIBLE";
+            const status = results[id] ? "COMPLETADA" : "DISPONIBLE";
             return `
                 <article class="phase-card">
-                    <div class="phase-card-top"><span class="phase-status ${results[id] ? "is-complete" : ""} ${unavailable ? "is-unavailable" : ""}">${status}</span></div>
+                    <div class="phase-card-top"><span class="phase-status ${results[id] ? "is-complete" : ""}">${status}</span></div>
                     <h3>${phase.name}</h3>
                     <p>${phase.description}</p>
                     <button class="phase-button" type="button" data-phase="${id}">${results[id] ? "Repetir fase" : "Comenzar fase"}<span aria-hidden="true">&#8594;</span></button>
@@ -306,10 +321,10 @@ function renderPhasePrerequisiteConfirmation() {
     menuButton.hidden = true;
     app.innerHTML = `
         <section class="phase-prerequisite" aria-labelledby="phase-prerequisite-heading">
-            <h1 id="phase-prerequisite-heading">Es necesario realizar la primera fase para hacer esta fase. ¿Deseas continuar?</h1>
+            <h1 id="phase-prerequisite-heading">Se recomienda completar la Fase 1 antes de continuar con esta fase.</h1>
             <div class="phase-prerequisite-actions">
-                <button class="quiet-button" type="button" data-action="cancel-prerequisite">No</button>
-                <button class="primary-button" type="button" data-action="continue-prerequisite">Sí</button>
+                <button class="quiet-button" type="button" data-action="cancel-prerequisite">Regresar</button>
+                <button class="primary-button" type="button" data-action="continue-prerequisite">Continuar de todos modos</button>
             </div>
         </section>
     `;
@@ -345,15 +360,15 @@ function resetSession() {
     }
 }
 
-function startPhaseFlow(phaseId) {
-    if (["fase4", "fase6"].includes(phaseId) && !results.fase1) {
+function startPhaseFlow(phaseId, skipRecommendation = false) {
+    if (!skipRecommendation && ["fase4", "fase6"].includes(phaseId) && !results.fase1) {
         pendingPhaseAfterFase1 = phaseId;
         renderPhasePrerequisiteConfirmation();
         return;
     }
     clearTimers();
     stopAllSounds();
-    if (phaseId !== "fase1") pendingPhaseAfterFase1 = null;
+    pendingPhaseAfterFase1 = null;
     state = { phaseId };
     menuButton.hidden = false;
     if (phaseId === "fase1") {
@@ -651,12 +666,12 @@ function completePhase() {
 
 function renderRecordCard(phaseId) {
     const phase = phases[phaseId];
-    const record = results[phaseId];
+    const record = normalizePhaseRecord(results[phaseId]);
     if (!record) {
         return `<article class="record-card record-pending"><div class="record-card-heading"><span class="phase-index">${phase.name}</span><span class="phase-status">PENDIENTE</span></div><p>Aún no hay resultados registrados.</p></article>`;
     }
     const responseDetails = categories.map(category => {
-        const times = record.responseTimes?.[category.id] || [];
+        const times = record.responseTimes[category.id] || [];
         return `
             <details class="response-category">
                 <summary><span>${category.name}</span><span>${times.length} de ${trialsPerCategory}</span></summary>
@@ -691,12 +706,13 @@ function renderCompletion() {
         ? `Continuar a ${phases[nextPhase].name}`
         : "Siguiente fase";
     const isFinalPhase = phaseId === "fase6";
+    const completedRecord = normalizePhaseRecord(results[phaseId]);
     app.innerHTML = `
         <section class="completion-page">
             <div class="completion-heading"><span class="completion-check" aria-hidden="true">&#10003;</span><p class="eyebrow">${isFinalPhase ? "REGISTRO DE SESIÓN" : "FASE COMPLETADA"}</p><h1>¡Bien hecho!</h1><p>${isFinalPhase ? "Este es el registro de resultados de las tres fases." : `${phases[phaseId].name} completada. Aquí tienes el registro de esta fase.`}</p></div>
             ${isFinalPhase
                 ? `<div class="record-grid">${Object.keys(phases).map(renderRecordCard).join("")}</div>`
-                : `<div class="single-record">${renderRecordCard(phaseId)}<p class="total-time">Tiempo total de la fase <strong>${formatDuration(results[phaseId].totalSeconds)}</strong></p></div>`
+                : `<div class="single-record">${renderRecordCard(phaseId)}<p class="total-time">Tiempo total de la fase <strong>${formatDuration(completedRecord?.totalSeconds || 0)}</strong></p></div>`
             }
             <div class="completion-actions"><button class="quiet-button" type="button" data-action="menu">Menú principal</button>${nextPhase ? `<button class="primary-button" type="button" data-phase="${nextPhase}">${nextPhaseLabel} <span aria-hidden="true">&#8594;</span></button>` : ""}</div>
         </section>
@@ -724,7 +740,11 @@ app.addEventListener("click", event => {
     if (actionButton.dataset.action === "reset-session") resetSession();
     if (actionButton.dataset.action === "settings") renderSettings();
     if (actionButton.dataset.action === "settings-back") renderHome();
-    if (actionButton.dataset.action === "continue-prerequisite") startPhaseFlow("fase1");
+    if (actionButton.dataset.action === "continue-prerequisite") {
+        const phaseId = pendingPhaseAfterFase1 || "fase1";
+        pendingPhaseAfterFase1 = null;
+        startPhaseFlow(phaseId, true);
+    }
     if (actionButton.dataset.action === "cancel-prerequisite") renderHome();
 });
 
